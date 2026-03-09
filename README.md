@@ -1,67 +1,66 @@
-# clinical-notes-nlp-rag-agent
+## Core Components
 
-# 🏥 Clinical Notes NLP Pipeline
+### 1) Data Loading
+Synthetic clinical notes are loaded from a JSONL file into a Pandas DataFrame for downstream processing.
 
-An end-to-end NLP pipeline for parsing, structuring, analysing, and querying free-text synthetic clinical notes in JSONL format — from raw unstructured text to a fully agentic RAG assistant.
+### 2) Section Extraction
+Clinical notes are parsed into structured sections using regex-based header detection.  
+Examples of extracted sections include:
 
-> ⚠️ All patient data used in this project is entirely **synthetic and fictional**. Do not use for clinical decision-making.
+- `HPI`
+- `LABS`
+- `PMH`
+- `ROS`
+- `PE`
+- `ALLERGIES`
+- `Assessment/Plan`
+- `Chief Complaint`
+- `Counseling`
+- `Narrative`
+- `PATIENT`
+
+This converts messy note text into clean section-level columns.
+
+### 3) Lab Parsing
+The `LABS` section is parsed into structured lab fields such as:
+
+- HbA1c
+- WBC
+- Creatinine
+- HIV Ag/Ab
+- Gonorrhea NAAT
+- Chlamydia NAAT
+
+### 4) Feature Engineering
+Additional structured features are extracted from text, including:
+
+- Age
+- Sex
+- Numeric lab values
+- Standardized note-level fields
+
+### 5) Patient-Level Aggregation
+Note-level data is aggregated into patient-level summaries for downstream querying and analysis.
+
+### 6) Negation Detection
+Rule-based regex logic identifies common negated findings, such as:
+
+- denies fever
+- no chest pain
+- denies shortness of breath
+- denies dysuria
+
+### 7) RAG Pipeline
+Section-level chunks are embedded using a sentence-transformer model and stored in a FAISS index for fast semantic retrieval.
+
+### 8) Agentic RAG
+A GPT-4o-mini tool-calling agent decides which retrieval path to use before answering a user question.
 
 ---
 
-## 📌 What This Project Demonstrates
+## Example of Section Parsing
 
-| Skill | How it shows up |
-|-------|----------------|
-| NLP text parsing | Regex-based section header detection across 17 clinical note fields |
-| Information extraction | Structured key-value parsing of LABS, demographics, and negation patterns |
-| Data engineering | Note-level → patient-level aggregation with Pandas |
-| Semantic search | FAISS vector index over 3,308 section-level chunks |
-| RAG | GPT-4o grounded Q&A with structured JSON evidence citations |
-| Agentic AI | Multi-tool GPT-4o-mini agent with decision-making across 3 retrieval strategies |
-
----
-
-## 🏗️ Pipeline Overview
-
-```
-JSONL → Parse → Extract Sections → Parse Labs → Feature Engineering
-                                                        ↓
-                                              Patient-Level Summary
-                                                        ↓
-                                              Negation Detection
-                                                        ↓
-                                         Chunk → Embed → FAISS Index
-                                                        ↓
-                                         RAG (GPT-4o) + Agent (GPT-4o-mini)
-```
-
-| Step | Description |
-|------|-------------|
-| 1. Data Loading | Read 364 clinical notes from JSONL into a Pandas DataFrame |
-| 2. Section Extraction | Regex parser detects 17 unique section headers (HPI, LABS, PMH, ROS…) and extracts each into a column |
-| 3. Lab Parsing | Parse the LABS section into structured `lab_*` columns (HbA1c, WBC, Creatinine, HIV Ag/Ab…) |
-| 4. Feature Engineering | Extract age, sex from the PATIENT field; normalise lab values to numeric |
-| 5. Patient-Level Summary | Aggregate 364 notes → 60 patients: note count, last visit, max HbA1c, most recent HIV result |
-| 6. Negation Detection | Rule-based regex flags (denies fever, no chest pain, denies SOB, denies dysuria) with unit tests |
-| 7. RAG Pipeline | 3,308 section chunks embedded with MiniLM-L6-v2, stored in FAISS, answered with GPT-4o |
-| 8. Agentic RAG | GPT-4o-mini tool-calling agent with 3 tools and multi-round reasoning |
-
----
-
-## 📊 Dataset
-
-- **364 clinical notes** across **60 patients**
-- **Note types**: Discharge Summary, ED Note, Progress Note, and more
-- **17 section headers** detected: `HPI`, `LABS`, `PMH`, `ROS`, `PE`, `ALLERGIES`, `Assessment/Plan`, `Chief Complaint`, `Counseling`, `Narrative`, `PATIENT`, and others
-- **6 lab columns** extracted: HbA1c, WBC, Creatinine, HIV Ag/Ab, Gonorrhea NAAT, Chlamydia NAAT
-
----
-
-## 🔍 Section Extraction
-
-Clinical notes are unstructured free text. The parser automatically discovers all section headers across the dataset and extracts their content into columns using a regex lookahead that stops at the next known header:
-
-```
+```text
 ALLERGIES: shellfish (anaphylaxis)
 HPI: Presents for routine follow-up. Reports variable medication adherence.
 LABS:
@@ -69,121 +68,138 @@ LABS:
   - WBC: 12.2 K/uL
   - HIV Ag/Ab: pending
 ```
-→ becomes structured columns `allergies`, `hpi`, `labs`, etc.
+
+This is transformed into structured fields such as:
+
+- `allergies`
+- `hpi`
+- `labs`
 
 ---
 
-## 🤖 Agentic RAG
+## Agentic Retrieval Design
 
-The agent has access to **3 tools** and decides which to use per question:
+The agent uses three tools depending on the question:
 
-| Tool | When the agent uses it |
-|------|----------------------|
-| `search_notes` | Semantic search across all 3,308 chunks — best for finding specific clinical facts |
-| `get_patient_summary` | Structured patient-level data — best for aggregate questions (max HbA1c, note count) |
-| `get_all_sections_for_patient` | Full note history for one patient — best for comprehensive patient summaries |
+| Tool | Purpose |
+|------|---------|
+| `search_notes` | Semantic search across chunked note sections |
+| `get_patient_summary` | Structured patient-level summary lookup |
+| `get_all_sections_for_patient` | Full section history for a selected patient |
 
-Multi-round loop (`max_tool_rounds=3`) allows the agent to call multiple tools before committing to an answer.
-
----
-
-## 🛠️ Tech Stack
-
-- **Data** — `pandas`, `numpy`
-- **NLP parsing** — `re` (standard library regex)
-- **Embeddings** — `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim)
-- **Vector search** — `faiss-cpu` (IndexFlatIP / cosine similarity)
-- **LLM** — OpenAI `gpt-4o` (RAG generation) + `gpt-4o-mini` (agent)
-- **No LangChain** — everything built from scratch
+This allows the system to combine retrieval, structured lookup, and patient-specific context in a multi-step reasoning loop.
 
 ---
 
-## 📁 Repository Structure
+## Tech Stack
 
-```
-clinical-notes-nlp/
+- **Python**
+- **pandas**
+- **numpy**
+- **re** (standard library regex)
+- **sentence-transformers**
+- **FAISS**
+- **OpenAI GPT-4o**
+- **OpenAI GPT-4o-mini**
+- **Jupyter Notebook**
+
+> Built from scratch without LangChain.
+
+---
+
+## Repository Structure
+
+```text
+clinical-notes-nlp-rag-agent/
 │
-├── notebook/
-│   └── clinical_notes_nlp.ipynb    # Main notebook (full pipeline)
 ├── data/
-│   └── clinical_notes.jsonl        # Synthetic clinical notes (not committed — see below)
+│   └── clinical_notes.jsonl
+├── notebooks/
+│   └── clinical_notes_nlp.ipynb
 ├── .gitignore
 ├── LICENSE
 └── README.md
 ```
 
-> **Note:** `rag_chunks.index` and `rag_chunks.json` are generated automatically when you run the notebook. They are excluded from the repo (see `.gitignore`).
-
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
-### 1. Clone the repo
+### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Mehrnoosh-h/clinical-notes-nlp.git
-cd clinical-notes-nlp
+git clone https://github.com/Mehrnoosh-h/clinical-notes-nlp-rag-agent.git
+cd clinical-notes-nlp-rag-agent
 ```
 
 ### 2. Install dependencies
 
 ```bash
-pip install pandas numpy faiss-cpu sentence-transformers openai python-dotenv
+pip install pandas numpy faiss-cpu sentence-transformers openai python-dotenv jupyter
 ```
 
 ### 3. Set your OpenAI API key
 
 Create a `.env` file in the project root:
 
-```
-OPENAI_API_KEY=sk-...
-```
-
-### 4. Add the data file
-
-Place your JSONL file at:
-
-```
-data/clinical_notes.jsonl
+```env
+OPENAI_API_KEY=your_api_key_here
 ```
 
-Or update `DATA_PATH` in the notebook.
+### 4. Verify the data path
+
+Make sure your notebook points to:
+
+```python
+DATA_PATH = Path("data/clinical_notes.jsonl")
+```
 
 ### 5. Run the notebook
 
 ```bash
-jupyter notebook notebook/clinical_notes_nlp.ipynb
+jupyter notebook notebooks/clinical_notes_nlp.ipynb
 ```
 
-Run all cells top to bottom. The FAISS index and chunk records will be generated automatically on first run.
+Run all cells from top to bottom.
 
 ---
 
-## ⚙️ Configuration
+## Key Outputs
 
-| Constant | Default | Description |
-|----------|---------|-------------|
-| `EMBED_MODEL_NAME` | `all-MiniLM-L6-v2` | Sentence embedding model |
-| `INDEX_PATH` | `rag_chunks.index` | FAISS index save path |
-| `CHUNKS_PATH` | `rag_chunks.json` | Chunk records save path |
-| `k` | `5` | Chunks retrieved per query |
-| `max_tool_rounds` | `3` | Max agent tool-call rounds |
+Running the notebook generates the main artifacts needed for retrieval and QA, including:
 
----
+- Parsed note sections
+- Structured lab and demographic features
+- Patient-level summary tables
+- Chunked retrieval records
+- FAISS vector index files
 
-## 🔒 .gitignore
-
-```
-.env
-rag_chunks.index
-rag_chunks.json
-data/
-__pycache__/
-.ipynb_checkpoints/
-```
+If generated locally, retrieval artifacts such as FAISS indexes and chunk records can be excluded with `.gitignore`.
 
 ---
 
-## 📄 License
+## Why This Project Matters
 
-MIT License. All clinical data is entirely synthetic.
+This project shows how NLP, information extraction, vector search, and LLM-based reasoning can be combined into a practical pipeline for working with unstructured clinical text.
+
+It is especially relevant for roles in:
+
+- Data Science
+- NLP / LLM Engineering
+- Applied Machine Learning
+- Healthcare AI
+- AI Product Prototyping
+
+---
+
+## Notes
+
+- All clinical notes in this repository are synthetic.
+- This project is intended for demonstration and learning.
+- The pipeline emphasizes transparency by combining structured extraction with retrieval-grounded generation.
+
+---
+
+## License
+
+This project is licensed under the **MIT License**.
